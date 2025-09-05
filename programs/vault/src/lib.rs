@@ -11,6 +11,7 @@ pub mod vault {
         msg!("Greetings from: {:?}", ctx.program_id);
         msg!("Greetings from: {:?}", ctx.program_id);
         msg!("Greetings from: {:?}", ctx.program_id);
+        msg!("Greetings from: {:?}", ctx.program_id);
 
         Ok(())
     }
