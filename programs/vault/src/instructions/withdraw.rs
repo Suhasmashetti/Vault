@@ -1,21 +1,28 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, TransferChecked, Token, TokenAccount, Mint};
-use crate::state::VaultDataAccount;
-use crate::error::VaultError;
-use crate::vault;
+use 
+    anchor_spl::{associated_token::AssociatedToken, 
+    token::{close_account, CloseAccount}, 
+    token_interface::{transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked}};
 
-pub fn withdraw_tokens(ctx: Context<WithdrawStruct>, amount: u64) -> Result<()> {
+use crate::{error::VaultError, state::VaultDataAccount};
 
+
+pub fn withdraw_tokens(ctx: Context<WithdrawStruct>) -> Result<()> {
     let vault_data = &ctx.accounts.vault_data;
-    let seeds = &[
+
+    let seeds: &[&[u8]] = &[
         b"vault_data",
         vault_data.depositer.as_ref(),
         vault_data.recipient.as_ref(),
         &vault_data.seed.to_le_bytes(),
         &[vault_data.vault_bump],
     ];
-    let signer = &[&seeds[..]];
-    token::transfer_checked(
+    let signer_seeds = &[&seeds[..]];
+    let current_time = Clock::get()?.unix_timestamp;
+    require!(current_time >= vault_data.unlock_time, VaultError::VaultLocked);
+    require!(vault_data.total_amount > 0, VaultError::VaultEmpty);
+
+    transfer_checked(
         CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
             TransferChecked {
@@ -24,10 +31,22 @@ pub fn withdraw_tokens(ctx: Context<WithdrawStruct>, amount: u64) -> Result<()> 
                 mint: ctx.accounts.mint.to_account_info(),
                 authority: ctx.accounts.vault_data.to_account_info(),
             },
-            seeds,
+            signer_seeds,
         ),
-        amount,
+        vault_data.total_amount,
         ctx.accounts.mint.decimals,
+    )?;
+
+    close_account(
+        CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            CloseAccount {
+                account: ctx.accounts.vault_token_account.to_account_info(),
+                destination: ctx.accounts.depositer.to_account_info(),
+                authority: ctx.accounts.vault_data.to_account_info(),
+            },
+            signer_seeds,
+        ),
     )?;
 
     Ok(())
@@ -35,8 +54,15 @@ pub fn withdraw_tokens(ctx: Context<WithdrawStruct>, amount: u64) -> Result<()> 
 
 #[derive(Accounts)]
 pub struct WithdrawStruct<'info> {
+
     #[account(mut)]
     pub recipient: Signer<'info>,
+
+    #[account(mut)]
+    pub depositer: SystemAccount<'info>,
+
+    pub mint: InterfaceAccount<'info, Mint>,
+
     #[account(
         mut,
         close = depositer,
@@ -47,23 +73,23 @@ pub struct WithdrawStruct<'info> {
         has_one = mint,
     )]
     pub vault_data: Account<'info, VaultDataAccount>,
+
     #[account(
         mut,
-        associated_token::authority = vault_data,
-        associated_token::mint = mint,
+        token::authority = vault_data,
+        token::mint = mint,
     )]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init_if_needed,
         payer = recipient,
         associated_token::authority = recipient,
         associated_token::mint = mint,
-        associated_token::token_program = token_program,
     )]
-    pub recipient_token_account: Account<'info, TokenAccount>,
-    pub mint: Account<'info, Mint>,
+    pub recipient_token_account: InterfaceAccount<'info, TokenAccount>,
+
     pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
 }
