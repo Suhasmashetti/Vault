@@ -10,6 +10,6 @@ pub struct VaultDataAccount {
     pub time_of_deposit: i64,
     pub unlock_time: i64,
     pub seed: u64,
+    pub mint: Pubkey,
     pub vault_bump: u8, 
-    
 }
